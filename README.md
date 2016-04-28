@@ -22,3 +22,34 @@ Edit a few vars `system_initial_setup.yml` to meet your needs:
 
 Finally just run `ansible-playbook system_initial_setup.yml`
 
+Tasks
+-
+What does the playbook do?
+  - set hostname
+  - expand root filesystem
+  - deploy bash prompt
+  - deploy .bashrc file
+  - add wheel group
+  - add SSH key
+  - set up pi user
+  - set up root user
+  - passwordless su for pi user
+  - disable serial console
+  - local autologin on tty1 (optional)
+  - install any updates (safe-upgrade)
+  - remove packages
+  - install packages
+  - package cleanup
+  - stop services
+  - deactivate services
+  - turn off video output (optional)
+  - deploy zram init file
+  - activate zram
+  - change tmp directories to tmpfs
+  - install dropbear (optional)
+  - activate dropbear (optional)
+  - stop openssh (optional)
+  - start dropbear (optional)
+  - remove openssh (optional)
+  - reboot device
+
