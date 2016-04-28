@@ -1,0 +1,5 @@
+#!/bin/sh 
+
+# turn off tv output
+/usr/bin/tvservice --off
+

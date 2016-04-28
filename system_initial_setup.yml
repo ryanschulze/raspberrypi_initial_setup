@@ -1,0 +1,181 @@
+---
+
+- name: Initial setup from vanilla raspbian image
+  hosts: raspberrypi
+  remote_user: pi
+  become: yes
+  become_user: root
+  vars:
+    raspberry_local_autologin: true
+    raspberry_replace_sshd:    true
+    raspberry_headless:        true
+    raspberry_hostname:        raspberrypi
+    raspberry_root_password:   7DxvI5PmjRsJW60da2EgjbdR
+    raspberry_user_password:   bnjKfFvSqoje3Mv4YRgv3gxI
+    raspberry_ssh_keys:
+      - 'ssh-rsa blablablabla foo@bar'
+    raspberry_packages_install:
+      - tmux
+      - mtr-tiny
+      - tcpdump
+      - iptraf
+      - vim
+      - sysstat
+      - iotop
+      - htop
+      - lsof
+      - dosfstools
+      - w3m
+      - ifenslave
+      - inetutils-syslogd
+      - nmap
+      - tshark
+      - nethogs
+      - bridge-utils
+      - iw
+    raspberry_packages_deinstall:
+      - aspell
+      - desktop-base
+      - gnome-icon-theme
+      - gnome-themes-standard
+      - hunspell-en-us
+      - libaspell15
+      - libgtk2.0-common
+      - libgtk-3-common
+      - libqtgui4
+      - libwebkitgtk-1.0-0
+      - libwebkitgtk-3.0-0
+      - lxde
+      - lxde-icon-theme
+      - lxsession
+      - lxtask
+      - lxterminal
+      - omxplayer
+      - python-pygame
+      - scratch
+      - squeak-vm
+      - xserver-common
+      - zenity
+      - dillo
+      - libqt4-network
+      - libqtdbus4
+      - libqt4-xml
+      - libqtcore4
+      - cups-bsd
+      - cups-client
+      - cups-common
+      - ntp 
+      - wolfram-engine
+      - rsyslog
+    raspberry_services_deactivate:
+      - triggerhappy
+    ansible_ssh_pass:         raspberry
+
+  tasks:
+    - name: Set hostname
+      hostname: name="{{ raspberry_hostname }}"
+
+    - name: expand root filesystem
+      command: raspi-config --expand-rootfs
+
+    - name: bash prompt
+      copy: src=files/bash.prompt dest=/etc/bash.prompt owner=root group=root mode='0644'
+
+    - name: .bashrc file
+      copy: src=files/.bashrc dest=/root/.bashrc owner={{ item }} group={{ item }} mode='0644'
+      with_items:
+       - root
+       - pi
+
+    - name: Add wheel group
+      group: name=wheel state=present system=yes
+
+    - name: Add SSH key
+      authorized_key: user={{ item[0] }} key="{{ item[1] }}" state=present
+      with_nested:
+        - [ 'pi', 'root' ]
+        - raspberry_ssh_keys
+
+    - name: Set up pi user
+      user: name=pi state=present password={{ raspberry_user_password | password_hash('sha512') }} update_password=always groups=wheel,sudo append=yes
+
+    - name: Set up root user
+      user: name=root state=present password={{ raspberry_root_password | password_hash('sha512') }} update_password=always groups=wheel append=yes
+
+    - name: Passwordless su for pi user
+      lineinfile: state=present dest=/etc/pam.d/su regexp="^.*auth\s+sufficient pam_wheel.so trust" line="auth       sufficient pam_wheel.so trust"
+
+    - name: disable serial console
+      command: systemctl {{ item }} serial-getty@ttyAMA0.service
+      with_items:
+        - stop
+        - disable
+
+    - name: Local autologin on tty1
+      lineinfile: state=present dest=/etc/systemd/system/getty.target.wants/getty@tty1.service regexp="^ExecStart=.+$" line="ExecStart=-/sbin/agetty --noclear --autologin root %I $TERM"
+      when: raspberry_local_autologin
+
+    - name: Install any updates (safe-upgrade)
+      apt: upgrade=safe
+      register: packageupdate 
+     
+    - name: Packages to remove
+      apt: pkg={{ item }} state=absent purge=yes
+      with_items: raspberry_packages_deinstall
+
+    - name: Packages to install
+      apt: pkg={{ item }} state=latest  
+      with_items: raspberry_packages_install
+    
+    - name: Package cleanup
+      command: "{{ item }}"
+      with_items:
+        - apt-get -y autoclean
+        - apt-get -y autoremove
+   
+    - name: services to stop
+      command: service {{ item }} stop
+      with_items: raspberry_services_deactivate
+    
+    - name: services to deactivate
+      command: update-rc.d {{ item }} remove
+      with_items: raspberry_services_deactivate
+    
+    - name: turn off video output
+      copy: src=files/rc.local dest=/etc/rc.local owner=root group=root mode='0755'
+      when: raspberry_headless
+
+    - name: zram init file
+      copy: src=files/zram dest=/etc/init.d/zram owner=root group=root mode='0755'
+
+    - name: Activate zram
+      service: enabled=yes name=zram state=started
+
+    - name: Change tmp directories to tmpfs
+      lineinfile: dest=/etc/fstab regexp="^tmpfs {{ item }}" line="tmpfs {{ item }} tmpfs rw,nosuid,nodev,noexec,noatime,mode=1777 0 0"
+      with_items:
+        - /tmp
+        - /var/tmp
+
+    - name: Install dropbear
+      apt: pkg=dropbear  state=latest  
+      when: raspberry_replace_sshd
+
+    - name: Activate dropbear
+      lineinfile: state=present dest=/etc/default/dropbear regexp="^NO_START=.+$" line="NO_START=0"
+      when: raspberry_replace_sshd
+
+    - name: Stop openssh
+      service: name=ssh state=stopped
+      when: raspberry_replace_sshd
+
+    - name: Start dropbear
+      service: name=dropbear state=started
+      when: raspberry_replace_sshd
+
+    - name: Remove openssh
+      apt: pkg=openssh-server state=absent
+      when: raspberry_replace_sshd
+
+    - name: Reboot device
+      command: shutdown -r now
